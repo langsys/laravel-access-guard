@@ -2,6 +2,7 @@
 
 namespace Langsys\AccessGuard;
 
+use BackedEnum;
 use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Collection;
@@ -9,7 +10,10 @@ use Illuminate\Support\Facades\Auth;
 use Langsys\AccessGuard\Contracts\Authorizable;
 use Langsys\AccessGuard\Contracts\AuthorizableByKey;
 use Langsys\AccessGuard\Contracts\AuthorizableByUser;
+use Langsys\AccessGuard\Contracts\AuthorizableInEntity;
 use Langsys\AccessGuard\Contracts\GuardableResource;
+use Langsys\AccessGuard\Bridge\ApiKeyAuthorizable;
+use Langsys\AccessGuard\Support\Config;
 
 class AccessGuardService
 {
@@ -39,34 +43,19 @@ class AccessGuardService
     }
 
     /**
-     * Authorize the current subject for a permission on an entity.
+     * Authorize the current request's subject for a permission on an entity.
      *
      * @throws AuthorizationException when access is denied.
      */
-    public function authorize(string $permission, ?GuardableResource $entity): void
+    public function authorize(BackedEnum|string $permission, ?GuardableResource $entity): void
     {
         $user = $this->resolveUser();
-
-        if ($user instanceof Authorizable && $user->isSuperAdmin()) {
-            return;
-        }
-
-        // An API key on the request takes precedence — it identifies a
-        // machine-to-machine call rather than the session user (if any).
         $subject = $this->resolveApiKey() ?? $user;
 
-        if (! $subject || ! $entity) {
-            throw new AuthorizationException();
-        }
-
-        match (true) {
-            $subject instanceof AuthorizableByKey => $this->authorizeKey($subject, $permission, $entity),
-            $subject instanceof AuthorizableByUser => $this->authorizeUser($subject, $permission, $entity),
-            default => throw new AuthorizationException(),
-        };
+        $this->enforce($user, $subject, Config::value($permission), $entity);
     }
 
-    public function allows(string $permission, ?GuardableResource $entity): bool
+    public function allows(BackedEnum|string $permission, ?GuardableResource $entity): bool
     {
         try {
             $this->authorize($permission, $entity);
@@ -77,16 +66,31 @@ class AccessGuardService
         }
     }
 
-    public function denies(string $permission, ?GuardableResource $entity): bool
+    public function denies(BackedEnum|string $permission, ?GuardableResource $entity): bool
     {
         return ! $this->allows($permission, $entity);
+    }
+
+    /**
+     * Authorize an explicit subject (used by the Gate integration, where the
+     * subject is the Gate user rather than the request's resolved subject).
+     */
+    public function allowsForUser(?object $user, BackedEnum|string $permission, ?GuardableResource $entity): bool
+    {
+        try {
+            $this->enforce($user, $user, Config::value($permission), $entity);
+
+            return true;
+        } catch (AuthorizationException) {
+            return false;
+        }
     }
 
     /**
      * Return only the items the current subject is authorized to access.
      * Items that are not GuardableResources pass through untouched.
      */
-    public function filterByPermission(string $permission, Collection $collection): Collection
+    public function filterByPermission(BackedEnum|string $permission, Collection $collection): Collection
     {
         return $collection->filter(function ($item) use ($permission) {
             if (! $item instanceof GuardableResource) {
@@ -97,19 +101,44 @@ class AccessGuardService
         });
     }
 
-    private function authorizeKey(AuthorizableByKey $key, string $permission, GuardableResource $entity): void
+    private function enforce(?object $user, ?object $subject, string $value, ?GuardableResource $entity): void
     {
-        if (! $key->keyHasPermission($permission) || ! $key->keyBelongsToEntity($entity)) {
+        if ($user instanceof Authorizable && $user->isSuperAdmin()) {
+            return;
+        }
+
+        if (! $subject || ! $entity) {
+            throw new AuthorizationException();
+        }
+
+        match (true) {
+            $subject instanceof AuthorizableByKey => $this->authorizeKey($subject, $value, $entity),
+            $subject instanceof AuthorizableInEntity => $this->authorizeInEntity($subject, $value, $entity),
+            $subject instanceof AuthorizableByUser => $this->authorizeUser($subject, $value, $entity),
+            default => throw new AuthorizationException(),
+        };
+    }
+
+    private function authorizeKey(AuthorizableByKey $key, string $value, GuardableResource $entity): void
+    {
+        if (! $key->keyHasPermission($value) || ! $key->keyBelongsToEntity($entity)) {
             throw new AuthorizationException();
         }
     }
 
-    private function authorizeUser(AuthorizableByUser $user, string $permission, GuardableResource $entity): void
+    private function authorizeInEntity(AuthorizableInEntity $user, string $value, GuardableResource $entity): void
+    {
+        if (! $user->hasPermissionInEntity($value, $entity)) {
+            throw new AuthorizationException();
+        }
+    }
+
+    private function authorizeUser(AuthorizableByUser $user, string $value, GuardableResource $entity): void
     {
         $role = $user->userRoleInEntity($entity);
 
         if (! $role
-            || ! $user->roleHasPermission($role, $permission)
+            || ! $user->roleHasPermission($role, $value)
             || $user->userHasDisabledEntity($entity)
         ) {
             throw new AuthorizationException();
@@ -128,14 +157,35 @@ class AccessGuardService
     private function resolveApiKey(): ?AuthorizableByKey
     {
         if ($this->apiKeyResolver) {
-            $key = ($this->apiKeyResolver)();
-
-            return $key instanceof AuthorizableByKey ? $key : null;
+            return $this->adaptApiKey(($this->apiKeyResolver)());
         }
 
         $attribute = config('access-guard.api_key_request_attribute', 'api_key');
-        $key = request()?->attributes->get($attribute);
 
-        return $key instanceof AuthorizableByKey ? $key : null;
+        return $this->adaptApiKey(request()?->attributes->get($attribute));
+    }
+
+    /**
+     * A key that already implements AuthorizableByKey is used directly (any
+     * key system can plug in). Otherwise, a key of the configured bridge class
+     * is adapted automatically — zero-config integration with laravel-api-keys.
+     */
+    private function adaptApiKey(mixed $key): ?AuthorizableByKey
+    {
+        if ($key instanceof AuthorizableByKey) {
+            return $key;
+        }
+
+        if ($key === null) {
+            return null;
+        }
+
+        $bridge = config('access-guard.api_key.bridge');
+
+        if ($bridge && $key instanceof $bridge) {
+            return new ApiKeyAuthorizable($key);
+        }
+
+        return null;
     }
 }

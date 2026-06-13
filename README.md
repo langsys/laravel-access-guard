@@ -45,6 +45,9 @@ $visible = AccessGuard::filterByPermission('view_projects', $projects);
 Implement the contracts on your own models — Access Guard never assumes your
 schema.
 
+> Don't have a role-assignment scheme yet? Use the `HasRolesInEntities` trait
+> (see *Assigning roles* below) and skip writing `userRoleInEntity()` by hand.
+
 **User** (`AuthorizableByUser`, plus optional `Authorizable` for super admins):
 
 ```php
@@ -121,31 +124,130 @@ AccessGuard::resolveUserUsing(fn () => /* ... */);
 AccessGuard::resolveApiKeyUsing(fn () => /* ... */);
 ```
 
-## Using with laravel-api-keys
+## Using with laravel-api-keys (zero-config)
 
-Make your API key model satisfy `AuthorizableByKey` — the two packages meet at
-permission strings, neither depends on the other:
+Install both packages and it just works — no subclassing, no contract to
+implement. When a key from `langsys/laravel-api-keys` authenticates, its
+middleware puts it on the request and Access Guard adapts it automatically: the
+key's own permissions are checked, and it is authorized against an entity only if
+it has been linked to that entity.
+
+Link keys to entities with the `AuthorizesWithApiKeys` trait:
 
 ```php
-use Langsys\AccessGuard\Contracts\AuthorizableByKey;
+use Langsys\AccessGuard\Concerns\AuthorizesWithApiKeys;
+use Langsys\AccessGuard\Contracts\GuardableResource;
 
-class ApiKey extends \Langsys\ApiKeys\Models\ApiKey implements AuthorizableByKey
+class Project extends Model implements GuardableResource
 {
-    public function keyHasPermission(string $permission): bool
-    {
-        return $this->hasPermission($permission);
-    }
+    use AuthorizesWithApiKeys;
+}
 
-    public function keyBelongsToEntity(mixed $entity): bool
-    {
-        return $entity->apiKeys()->whereKey($this->getKey())->exists();
-    }
+$project->grantApiKey($apiKey);   // this key may now act on this project
+$project->revokeApiKey($apiKey);
+```
+
+`AccessGuard::authorize('edit_projects', $project)` then passes for a key that
+both holds `edit_projects` and is linked to `$project`, and is denied otherwise.
+Linking is the one explicit step — it's a security boundary — and it lives in the
+`entity_has_api_keys` pivot. Without api-keys installed, only the user path runs.
+
+**Other key systems:** any object implementing `AuthorizableByKey` is used as-is.
+Point `config('access-guard.api_key.bridge')` at a different key class to
+auto-adapt it, or set it to `null` to turn the bridge off.
+
+## Assigning roles (batteries included)
+
+If you don't already have a membership scheme, add the `HasRolesInEntities` trait
+to your subject and implement `AuthorizableInEntity`. You get entity-scoped
+assignment backed by the `model_has_roles` pivot — no custom pivot or
+`userRoleInEntity()` to write:
+
+```php
+use Langsys\AccessGuard\Concerns\HasRolesInEntities;
+use Langsys\AccessGuard\Contracts\AuthorizableInEntity;
+
+class User extends Authenticatable implements Authorizable, AuthorizableInEntity
+{
+    use HasRolesInEntities;
 }
 ```
 
-The api-keys middleware drops the authenticated key onto the request, where
-Access Guard's default resolver finds it. Without api-keys installed, only the
-user path runs.
+```php
+$user->assignRole('project_admin', $project);   // role value, backed enum, or Role model
+$user->syncRoles(['viewer'], $project);
+$user->removeRole('project_admin', $project);
+
+$user->hasRole('project_admin', $project);                // bool
+$user->hasPermissionInEntity('edit_projects', $project);  // unions every role in the entity
+$user->rolesInEntity($project);                           // Collection<Role>
+$user->permissionsInEntity($project);                     // array<string>
+```
+
+A subject can hold multiple roles in one entity; permission checks union them.
+Override `entityIsDisabled($entity)` to exclude a subject from an entity even when
+a role would grant access (e.g. a user who left a project).
+
+> Already have your own pivot (like langsys's `organization_has_users.role`)? Skip
+> the trait and implement `AuthorizableByUser` instead — both paths are supported.
+
+## Gate & policy integration
+
+With `register_gate` on (default), Gate checks against a `GuardableResource` route
+through Access Guard, so the idiomatic Laravel APIs just work:
+
+```php
+$user->can('edit_projects', $project);
+$this->authorize('edit_projects', $project);   // in a controller
+// @can('edit_projects', $project) ... @endcan
+```
+
+A subject whose `isSuperAdmin()` is true passes every Gate check
+(`super_admin_via_gate`). Checks that aren't against a `GuardableResource` are left
+untouched for your own gates and policies.
+
+## Route middleware
+
+```php
+Route::get('/projects/{project}', [ProjectController::class, 'show'])
+    ->middleware('access-guard:view_projects,project');
+```
+
+The first argument is the permission; the optional second names the route
+parameter holding the entity (otherwise the first route-bound `GuardableResource`
+is used). Denial throws `AuthorizationException` (403).
+
+## Caching
+
+The role → permission map is cached (config `cache.store` / `expiration_time`) and
+flushed automatically on grant/revoke and any role/permission save or delete. Flush
+manually with `php artisan access-guard:cache-reset`.
+
+## Artisan commands
+
+```bash
+php artisan access-guard:create-permission view_projects "View projects"
+php artisan access-guard:create-role project_admin "Project Admin" --permissions=view_projects,edit_projects
+php artisan access-guard:show          # roles and the permissions they grant
+php artisan access-guard:cache-reset
+```
+
+## Enums
+
+Anywhere a permission or role name is accepted you can pass a string **or** a
+backed enum:
+
+```php
+enum Ability: string { case ViewProjects = 'view_projects'; }
+
+$role->grantPermissions([Ability::ViewProjects]);
+AccessGuard::allows(Ability::ViewProjects, $project);
+```
+
+## Events
+
+Set `events_enabled => true` to fire `RoleAssignedToModel`, `RoleRemovedFromModel`,
+`PermissionAssignedToRole`, and `PermissionRemovedFromRole` — useful for audit logging.
 
 ## Testing
 
