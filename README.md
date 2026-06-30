@@ -32,7 +32,7 @@ API key (linked *to* the entity). Permissions are plain strings.
 ```php
 use Langsys\AccessGuard\Facades\AccessGuard;
 
-AccessGuard::authorize('edit_projects', $project); // throws AuthorizationException if denied
+AccessGuard::authorize('edit_projects', $project); // throws UnauthorizedException (403) if denied
 
 if (AccessGuard::allows('view_projects', $project)) { /* ... */ }
 
@@ -179,9 +179,9 @@ $user->syncRoles(['viewer'], $project);
 $user->removeRole('project_admin', $project);
 
 $user->hasRole('project_admin', $project);                // bool
-$user->hasPermissionInEntity('edit_projects', $project);  // unions every role in the entity
+$user->hasPermissionInEntity('edit_projects', $project);  // unions every role + direct grant
 $user->rolesInEntity($project);                           // Collection<Role>
-$user->permissionsInEntity($project);                     // array<string>
+$user->permissionsInEntity($project);                     // array<string> (roles ∪ direct)
 ```
 
 A subject can hold multiple roles in one entity; permission checks union them.
@@ -190,6 +190,43 @@ a role would grant access (e.g. a user who left a project).
 
 > Already have your own pivot (like langsys's `organization_has_users.role`)? Skip
 > the trait and implement `AuthorizableByUser` instead — both paths are supported.
+
+### Direct permissions
+
+Sometimes a subject needs one permission in an entity without minting a role for
+it. Grant it directly — backed by the `model_has_permissions` pivot, still
+entity-scoped:
+
+```php
+$user->givePermission('export_data', $project);
+$user->revokePermission('export_data', $project);
+
+$user->directPermissionsInEntity($project);   // array<string> — just the direct grants
+$user->permissionsInEntity($project);         // array<string> — roles ∪ direct grants
+```
+
+`hasPermissionInEntity()` and every Gate check see the **union** of role-derived
+and direct permissions, so the two compose freely.
+
+## Wildcard permissions
+
+Off by default (checks are exact-match). Enable `wildcard.enabled` and a held
+permission may use `*` as a segment wildcard:
+
+```php
+// config/access-guard.php → 'wildcard' => ['enabled' => true, 'separator' => '.']
+
+$role->grantPermissions(['projects.*']);
+$user->hasPermissionInEntity('projects.edit', $project);   // true
+$user->hasPermissionInEntity('projects.delete', $project); // true
+$user->hasPermissionInEntity('users.edit', $project);      // false
+
+$role->grantPermissions(['*']);                            // grants everything
+```
+
+Wildcards apply only to **held** permissions; the permission you check for is
+always literal. With wildcards off, `projects.*` is just a permission named
+`projects.*`.
 
 ## Gate & policy integration
 
@@ -206,6 +243,15 @@ A subject whose `isSuperAdmin()` is true passes every Gate check
 (`super_admin_via_gate`). Checks that aren't against a `GuardableResource` are left
 untouched for your own gates and policies.
 
+Permissions already work in Blade through `@can` (the Gate integration above). For
+the **entity-scoped role** check there's a dedicated directive:
+
+```blade
+@hasrole('project_admin', $project)
+    {{-- visible only to admins of this project --}}
+@endhasrole
+```
+
 ## Route middleware
 
 ```php
@@ -215,7 +261,29 @@ Route::get('/projects/{project}', [ProjectController::class, 'show'])
 
 The first argument is the permission; the optional second names the route
 parameter holding the entity (otherwise the first route-bound `GuardableResource`
-is used). Denial throws `AuthorizationException` (403).
+is used). Denial throws `UnauthorizedException` (403).
+
+## Exceptions
+
+A denied `authorize()` throws `Langsys\AccessGuard\Exceptions\UnauthorizedException`,
+which extends Laravel's `AuthorizationException` (so it still renders as a 403 and
+existing handlers keep working). It carries the context that was denied:
+
+```php
+use Langsys\AccessGuard\Exceptions\UnauthorizedException;
+
+try {
+    AccessGuard::authorize('edit_projects', $project);
+} catch (UnauthorizedException $e) {
+    $e->permission; // 'edit_projects'
+    $e->entity;     // $project
+}
+```
+
+The permission name is **omitted from the exception message by default** so you
+don't leak your permission vocabulary in production responses; set
+`display_permission_in_exception => true` to include it (handy in local dev).
+Looking up a role that doesn't exist throws `RoleDoesNotExist`.
 
 ## Caching
 

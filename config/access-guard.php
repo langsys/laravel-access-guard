@@ -26,6 +26,7 @@ return [
         'permissions' => 'permissions',
         'role_has_permissions' => 'role_has_permissions',
         'model_has_roles' => 'model_has_roles',
+        'model_has_permissions' => 'model_has_permissions',
         'entity_has_api_keys' => 'entity_has_api_keys',
     ],
 
@@ -89,6 +90,32 @@ return [
     |
     */
     'events_enabled' => false,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Wildcard Permissions
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, a held permission may use `*` as a wildcard segment — e.g.
+    | granting `projects.*` satisfies a check for `projects.edit`, and `*` grants
+    | everything. Off by default; checks are exact-match.
+    |
+    */
+    'wildcard' => [
+        'enabled' => false,
+        'separator' => '.',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Exceptions
+    |--------------------------------------------------------------------------
+    |
+    | Include the missing permission name in the UnauthorizedException message.
+    | Leave false in production to avoid leaking your permission vocabulary.
+    |
+    */
+    'display_permission_in_exception' => false,
 
     /*
     |--------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 namespace Langsys\AccessGuard;
 
 use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Langsys\AccessGuard\Commands\CacheResetCommand;
@@ -27,6 +28,7 @@ class AccessGuardServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->registerGate();
+        $this->registerBladeDirectives();
 
         $this->app->make(Router::class)->aliasMiddleware('access-guard', EnsurePermission::class);
 
@@ -73,6 +75,23 @@ class AccessGuardServiceProvider extends ServiceProvider
             }
 
             return null;
+        });
+    }
+
+    /**
+     * Permission checks already work in Blade via @can (the Gate integration).
+     * This adds @hasrole($role, $entity) for the entity-scoped role check.
+     */
+    private function registerBladeDirectives(): void
+    {
+        if (! $this->app->bound('blade.compiler')) {
+            return;
+        }
+
+        Blade::if('hasrole', function ($role, $entity) {
+            $user = auth()->user();
+
+            return $user !== null && method_exists($user, 'hasRole') && $user->hasRole($role, $entity);
         });
     }
 }

@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Langsys\AccessGuard\Contracts\AuthorizableByKey;
 use Langsys\AccessGuard\Contracts\GuardableResource;
 use Langsys\AccessGuard\Support\Config;
+use Langsys\AccessGuard\Support\Wildcard;
 
 /**
  * Adapts a third-party API key (e.g. langsys/laravel-api-keys' ApiKey) to the
@@ -22,6 +23,14 @@ class ApiKeyAuthorizable implements AuthorizableByKey
 
     public function keyHasPermission(string $permission): bool
     {
+        if (config('access-guard.wildcard.enabled', false) && method_exists($this->key, 'permissionValues')) {
+            return Wildcard::matches(
+                $this->key->permissionValues(),
+                $permission,
+                config('access-guard.wildcard.separator', '.'),
+            );
+        }
+
         return $this->key->hasPermission($permission);
     }
 

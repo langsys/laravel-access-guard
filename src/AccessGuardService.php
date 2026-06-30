@@ -13,6 +13,7 @@ use Langsys\AccessGuard\Contracts\AuthorizableByUser;
 use Langsys\AccessGuard\Contracts\AuthorizableInEntity;
 use Langsys\AccessGuard\Contracts\GuardableResource;
 use Langsys\AccessGuard\Bridge\ApiKeyAuthorizable;
+use Langsys\AccessGuard\Exceptions\UnauthorizedException;
 use Langsys\AccessGuard\Support\Config;
 
 class AccessGuardService
@@ -108,28 +109,28 @@ class AccessGuardService
         }
 
         if (! $subject || ! $entity) {
-            throw new AuthorizationException();
+            throw UnauthorizedException::forPermission($value, $entity);
         }
 
         match (true) {
             $subject instanceof AuthorizableByKey => $this->authorizeKey($subject, $value, $entity),
             $subject instanceof AuthorizableInEntity => $this->authorizeInEntity($subject, $value, $entity),
             $subject instanceof AuthorizableByUser => $this->authorizeUser($subject, $value, $entity),
-            default => throw new AuthorizationException(),
+            default => throw UnauthorizedException::forPermission($value, $entity),
         };
     }
 
     private function authorizeKey(AuthorizableByKey $key, string $value, GuardableResource $entity): void
     {
         if (! $key->keyHasPermission($value) || ! $key->keyBelongsToEntity($entity)) {
-            throw new AuthorizationException();
+            throw UnauthorizedException::forPermission($value, $entity);
         }
     }
 
     private function authorizeInEntity(AuthorizableInEntity $user, string $value, GuardableResource $entity): void
     {
         if (! $user->hasPermissionInEntity($value, $entity)) {
-            throw new AuthorizationException();
+            throw UnauthorizedException::forPermission($value, $entity);
         }
     }
 
@@ -141,7 +142,7 @@ class AccessGuardService
             || ! $user->roleHasPermission($role, $value)
             || $user->userHasDisabledEntity($entity)
         ) {
-            throw new AuthorizationException();
+            throw UnauthorizedException::forPermission($value, $entity);
         }
     }
 
