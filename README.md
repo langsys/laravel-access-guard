@@ -53,6 +53,7 @@ schema.
 ```php
 use Langsys\AccessGuard\Contracts\Authorizable;
 use Langsys\AccessGuard\Contracts\AuthorizableByUser;
+use Langsys\AccessGuard\Contracts\GrantsPermissions;
 
 class User extends Authenticatable implements Authorizable, AuthorizableByUser
 {
@@ -61,14 +62,9 @@ class User extends Authenticatable implements Authorizable, AuthorizableByUser
         return $this->type === UserType::SuperAdmin;
     }
 
-    public function userRoleInEntity(mixed $entity): ?object
+    public function userRoleInEntity(mixed $entity): ?GrantsPermissions
     {
         return $this->roleInEntity($entity); // your pivot lookup → a Role
-    }
-
-    public function roleHasPermission(object $role, string $permission): bool
-    {
-        return $role->hasPermission($permission);
     }
 
     public function userHasDisabledEntity(mixed $entity): bool
@@ -77,6 +73,10 @@ class User extends Authenticatable implements Authorizable, AuthorizableByUser
     }
 }
 ```
+
+The role you return implements `GrantsPermissions` — a single method,
+`hasPermission(string $permission): bool` — so the role answers for itself
+whether it grants a permission. The bundled `Role` model implements it already.
 
 **Entity** — mark anything you authorize against with `GuardableResource`:
 
@@ -91,7 +91,8 @@ class Project extends Model implements GuardableResource {}
 ## Roles & permissions
 
 The bundled `Role` and `Permission` models (UUID keys, `value` + `label`) cover
-the vocabulary; `role_has_permissions` links them.
+the vocabulary; `role_has_permissions` links them, and `Role` implements
+`GrantsPermissions`.
 
 ```php
 use Langsys\AccessGuard\Models\Role;
@@ -112,7 +113,7 @@ On each `authorize()` call, Access Guard:
 2. otherwise picks the **API key** if one is present on the request, else the
    **authenticated user**;
 3. runs the key path (`keyHasPermission` **and** `keyBelongsToEntity`) or the
-   user path (`userRoleInEntity` → `roleHasPermission`, and not
+   user path (`userRoleInEntity` → the role's `hasPermission`, and not
    `userHasDisabledEntity`).
 
 By default the user comes from `Auth::user()` and the API key from the

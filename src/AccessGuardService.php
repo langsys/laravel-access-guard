@@ -139,7 +139,7 @@ class AccessGuardService
         $role = $user->userRoleInEntity($entity);
 
         if (! $role
-            || ! $user->roleHasPermission($role, $value)
+            || ! $role->hasPermission($value)
             || $user->userHasDisabledEntity($entity)
         ) {
             throw UnauthorizedException::forPermission($value, $entity);

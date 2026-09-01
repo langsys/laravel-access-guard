@@ -4,6 +4,7 @@ namespace Langsys\AccessGuard\Tests\Stubs;
 
 use Langsys\AccessGuard\Contracts\Authorizable;
 use Langsys\AccessGuard\Contracts\AuthorizableByUser;
+use Langsys\AccessGuard\Contracts\GrantsPermissions;
 
 class TestUser implements Authorizable, AuthorizableByUser
 {
@@ -19,14 +20,9 @@ class TestUser implements Authorizable, AuthorizableByUser
         return $this->superAdmin;
     }
 
-    public function userRoleInEntity(mixed $entity): ?object
+    public function userRoleInEntity(mixed $entity): ?GrantsPermissions
     {
         return $this->role;
-    }
-
-    public function roleHasPermission(object $role, string $permission): bool
-    {
-        return in_array($permission, $role->permissions ?? [], true);
     }
 
     public function userHasDisabledEntity(mixed $entity): bool

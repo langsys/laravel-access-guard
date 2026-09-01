@@ -7,12 +7,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Model;
 use Langsys\AccessGuard\Concerns\HasUuid;
 use Langsys\AccessGuard\Concerns\RefreshesPermissionCache;
+use Langsys\AccessGuard\Contracts\GrantsPermissions;
 use Langsys\AccessGuard\Events\PermissionAssignedToRole;
 use Langsys\AccessGuard\Events\PermissionRemovedFromRole;
 use Langsys\AccessGuard\PermissionRegistrar;
 use Langsys\AccessGuard\Support\Config;
 
-class Role extends Model
+class Role extends Model implements GrantsPermissions
 {
     use HasUuid;
     use RefreshesPermissionCache;
