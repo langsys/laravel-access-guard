@@ -37,9 +37,15 @@ class AccessGuardServiceProvider extends ServiceProvider
                 __DIR__ . '/../config/access-guard.php' => config_path('access-guard.php'),
             ], 'access-guard-config');
 
-            $this->publishesMigrations([
-                __DIR__ . '/../database/migrations' => database_path('migrations'),
-            ], 'access-guard-migrations');
+            // publishesMigrations() only exists on Laravel 11+; plain publishes()
+            // covers Laravel 10 (illuminate/support ^10 is supported).
+            $migrations = [__DIR__ . '/../database/migrations' => database_path('migrations')];
+
+            if (method_exists($this, 'publishesMigrations')) {
+                $this->publishesMigrations($migrations, 'access-guard-migrations');
+            } else {
+                $this->publishes($migrations, 'access-guard-migrations');
+            }
 
             $this->commands([
                 CreateRoleCommand::class,
