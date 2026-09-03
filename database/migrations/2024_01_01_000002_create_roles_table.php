@@ -3,16 +3,19 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Langsys\AccessGuard\Support\Config;
 
 return new class extends Migration
 {
     public function up(): void
     {
-        if (Schema::hasTable('roles')) {
+        $table = Config::table('roles');
+
+        if (Schema::hasTable($table)) {
             return;
         }
 
-        Schema::create('roles', function (Blueprint $table) {
+        Schema::create($table, function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->string('value')->unique();
             $table->string('label');
@@ -23,6 +26,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('roles');
+        Schema::dropIfExists(Config::table('roles'));
     }
 };

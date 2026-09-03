@@ -20,6 +20,13 @@ return [
     |--------------------------------------------------------------------------
     | Table Names
     |--------------------------------------------------------------------------
+    |
+    | If langsys/laravel-api-keys is installed, it stores its key permissions in
+    | the SAME `permissions` table (its migration skips creation when the table
+    | exists). Its `api-keys.tables.permissions` key must agree with the value
+    | below — setting one without the other silently produces two separate
+    | permission tables.
+    |
     */
     'tables' => [
         'roles' => 'roles',
