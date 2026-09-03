@@ -247,9 +247,22 @@ $this->authorize('edit_projects', $project);   // in a controller
 // @can('edit_projects', $project) ... @endcan
 ```
 
-A subject whose `isSuperAdmin()` is true passes every Gate check
-(`super_admin_via_gate`). Checks that aren't against a `GuardableResource` are left
-untouched for your own gates and policies.
+The hook is **grant-only** (the same contract as spatie/laravel-permission's):
+it answers `true` when the subject holds the permission and **abstains
+otherwise — it never denies**. Your gates and policies therefore keep full
+authority, even on `GuardableResource` models: a policy ability like
+`isOrganizationAdmin` is simply not Access Guard's to answer, and an
+unpermitted ability that nothing else defines falls to the Gate's default
+deny — so `$user->can('edit_projects', $project)` is still `false` for a user
+without the permission.
+
+The one consequence to know: **permissions grant**. A held permission
+short-circuits allow before a policy that would have denied, so don't give a
+policy method the same name as a permission unless you want the permission to
+win. A subject whose `isSuperAdmin()` is true passes every Gate check
+(`super_admin_via_gate`). Set `register_gate => false` to leave the Gate
+completely untouched — the facade, middleware, and everything else work the
+same without it.
 
 Permissions already work in Blade through `@can` (the Gate integration above). For
 the **entity-scoped role** check there's a dedicated directive:

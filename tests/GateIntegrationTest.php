@@ -36,4 +36,47 @@ class GateIntegrationTest extends TestCase
 
         $this->assertTrue(Gate::forUser($user)->allows('ping'));
     }
+
+    public function test_policy_keeps_authority_when_ability_is_not_a_held_permission(): void
+    {
+        Gate::policy(Project::class, ProjectTestPolicy::class);
+        $user = User::create([]);
+        $project = Project::create([]);
+
+        // The hook abstains (grant-only), so the policy method answers —
+        // even though the entity is a GuardableResource.
+        $this->assertTrue(Gate::forUser($user)->allows('isProjectAdmin', $project));
+        $this->assertTrue(Gate::forUser($user)->denies('isProjectAuditor', $project));
+    }
+
+    public function test_held_permission_grants_before_a_denying_policy(): void
+    {
+        Gate::policy(Project::class, ProjectTestPolicy::class);
+        $user = User::create([]);
+        $project = Project::create([]);
+        $role = Role::create(['value' => 'editor', 'label' => 'Editor'])->grantPermissions(['edit_projects']);
+        $user->assignRole($role, $project);
+
+        // Permissions grant: a held permission short-circuits allow even though
+        // the policy's edit_projects() would deny.
+        $this->assertTrue(Gate::forUser($user)->allows('edit_projects', $project));
+    }
+}
+
+class ProjectTestPolicy
+{
+    public function isProjectAdmin(User $user, Project $project): bool
+    {
+        return true;
+    }
+
+    public function isProjectAuditor(User $user, Project $project): bool
+    {
+        return false;
+    }
+
+    public function edit_projects(User $user, Project $project): bool
+    {
+        return false;
+    }
 }

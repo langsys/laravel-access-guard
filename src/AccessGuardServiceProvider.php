@@ -59,6 +59,11 @@ class AccessGuardServiceProvider extends ServiceProvider
     /**
      * Route Gate checks for GuardableResource entities through Access Guard, so
      * $user->can('edit_projects', $project), @can, and authorize() all work.
+     *
+     * The hook is grant-only: it returns true when the subject holds the
+     * permission and abstains (null) otherwise — it never denies, so gates and
+     * policies on the same models keep their full authority and an unpermitted
+     * ability nothing else answers falls to the Gate's default deny.
      */
     private function registerGate(): void
     {
@@ -77,7 +82,7 @@ class AccessGuardServiceProvider extends ServiceProvider
             $entity = $arguments[0] ?? null;
 
             if ($entity instanceof GuardableResource) {
-                return app('access-guard')->allowsForUser($user, $ability, $entity);
+                return app('access-guard')->allowsForUser($user, $ability, $entity) ?: null;
             }
 
             return null;
