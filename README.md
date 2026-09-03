@@ -125,6 +125,13 @@ AccessGuard::resolveUserUsing(fn () => /* ... */);
 AccessGuard::resolveApiKeyUsing(fn () => /* ... */);
 ```
 
+The resolvers run on **every** authorization check, and whatever they return *is*
+the identity every decision is made for. If your resolver memoises (a per-request
+cache, a function-static), it must invalidate when the identity **changes**, not
+only when it disappears — a cache that survives a subject swap serves the previous
+subject's authorization to the next one, which under Octane or queue workers means
+across requests.
+
 ## Using with laravel-api-keys (zero-config)
 
 Install both packages and it just works — no subclassing, no contract to
@@ -285,6 +292,12 @@ The permission name is **omitted from the exception message by default** so you
 don't leak your permission vocabulary in production responses; set
 `display_permission_in_exception => true` to include it (handy in local dev).
 Looking up a role that doesn't exist throws `RoleDoesNotExist`.
+
+If your app routes exceptions to handlers by **exact class** (a renderer map, a
+handler-per-basename factory) rather than by `instanceof`, register
+`Langsys\AccessGuard\Exceptions\UnauthorizedException` there — otherwise denials
+fall through to your generic handler and render as 500s even though
+authorization itself is working correctly.
 
 ## Caching
 
