@@ -5,8 +5,11 @@ namespace Langsys\AccessGuard\Tests;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Langsys\AccessGuard\Facades\AccessGuard;
+use Langsys\AccessGuard\Tests\Models\FakeActingApiKey;
 use Langsys\AccessGuard\Tests\Models\FakeApiKey;
 use Langsys\AccessGuard\Tests\Models\Project;
+use Langsys\AccessGuard\Tests\Stubs\TestRole;
+use Langsys\AccessGuard\Tests\Stubs\TestUser;
 
 class ApiKeyBridgeTest extends TestCase
 {
@@ -87,5 +90,34 @@ class ApiKeyBridgeTest extends TestCase
 
         $this->assertCount(1, $project->apiKeys()->get());
         $this->assertTrue($project->apiKeys()->first()->is($key));
+    }
+
+    public function test_a_bridged_key_that_acts_for_someone_also_needs_that_subject_to_hold_the_permission(): void
+    {
+        $project = Project::create([]);
+        $key = FakeActingApiKey::create(['id' => 'key-1', 'permissions' => ['edit_projects']]);
+        $project->grantApiKey($key);
+
+        AccessGuard::resolveApiKeyUsing(fn () => $key);
+
+        $key->actsFor(new TestUser(role: new TestRole(['edit_projects'])));
+        $this->assertTrue(AccessGuard::allows('edit_projects', $project));
+
+        $key->actsFor(new TestUser(role: new TestRole(['view_projects'])));
+        $this->assertTrue(AccessGuard::denies('edit_projects', $project));
+
+        $key->actsFor(null);
+        $this->assertTrue(AccessGuard::denies('edit_projects', $project));
+    }
+
+    public function test_a_bridged_key_class_with_the_contract_that_acts_for_nobody_is_checked_as_before(): void
+    {
+        $project = Project::create([]);
+        $key = FakeActingApiKey::create(['id' => 'key-1', 'permissions' => ['edit_projects']]);
+        $project->grantApiKey($key);
+
+        AccessGuard::resolveApiKeyUsing(fn () => $key);
+
+        $this->assertTrue(AccessGuard::allows('edit_projects', $project));
     }
 }

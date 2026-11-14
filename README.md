@@ -109,11 +109,13 @@ Seed these from a seeder; override the models via `config('access-guard.models')
 On each `authorize()` call, Access Guard:
 
 1. checks for a super admin (the resolved user implements `Authorizable` and
-   `isSuperAdmin()` is true) → allow;
+   `isSuperAdmin()` is true) → allow, unless the subject is a key that acts for
+   someone (see *Keys that act for someone*);
 2. otherwise picks the **API key** if one is present on the request, else the
    **authenticated user**;
-3. runs the key path (`keyHasPermission` **and** `keyBelongsToEntity`) or the
-   user path (`userRoleInEntity` → the role's `hasPermission`, and not
+3. runs the key path (`keyHasPermission` **and** `keyBelongsToEntity`, plus the
+   acting subject's own check for a key that acts for someone) or the user path
+   (`userRoleInEntity` → the role's `hasPermission`, and not
    `userHasDisabledEntity`).
 
 By default the user comes from `Auth::user()` and the API key from the
@@ -163,6 +165,107 @@ Linking is the one explicit step — it's a security boundary — and it lives i
 **Other key systems:** any object implementing `AuthorizableByKey` is used as-is.
 Point `config('access-guard.api_key.bridge')` at a different key class to
 auto-adapt it, or set it to `null` to turn the bridge off.
+
+## Entities inside other entities
+
+An entity that sits inside another, such as a project in an organization,
+implements `HasGuardableParent`:
+
+```php
+use Langsys\AccessGuard\Contracts\GuardableResource;
+use Langsys\AccessGuard\Contracts\HasGuardableParent;
+
+class Project extends Model implements GuardableResource, HasGuardableParent
+{
+    use AuthorizesWithApiKeys;
+
+    public function guardableParent(): ?GuardableResource
+    {
+        return $this->organization;
+    }
+}
+```
+
+A key linked to an entity then reaches everything below it. A key linked to an
+organization is authorized on each of the organization's projects, including
+projects created after the link. Reach runs downward only: a key linked to a
+project is not authorized on its organization or on the project's siblings.
+The lookup follows `guardableParent()` up as many levels as there are, answers in
+one query on `entity_has_api_keys` whatever the depth, and stops if a chain of
+parents loops back on itself.
+
+Only key links read the parent. A user's roles stay scoped to the entity they
+were granted in, so whether an organization admin may act on its projects is for
+your `userRoleInEntity()` (or your role assignments) to express.
+
+A key model that implements `AuthorizableByKey` itself can still use the pivot
+lookup, parents included:
+
+```php
+use Langsys\AccessGuard\Bridge\ApiKeyAuthorizable;
+
+public function keyBelongsToEntity(mixed $entity): bool
+{
+    return (new ApiKeyAuthorizable($this))->keyBelongsToEntity($entity);
+}
+```
+
+## Keys that act for someone
+
+A key can act for a subject, typically the person who created it, so that their
+own server can call your API as them. Implement `ActsOnBehalfOf` on the key,
+either the `AuthorizableByKey` model or the key class the bridge adapts:
+
+```php
+use Langsys\AccessGuard\Contracts\ActsOnBehalfOf;
+
+class ApiKey extends BaseApiKey implements ActsOnBehalfOf
+{
+    public function actsForSomeone(): bool
+    {
+        return $this->user_id !== null;
+    }
+
+    public function actsOnBehalfOf(): ?object
+    {
+        return $this->user;
+    }
+}
+```
+
+A key that acts for someone is authorized only when both halves pass:
+
+1. **The key's own checks.** It holds the permission and is linked to the entity
+   or to one of its ancestors.
+2. **Its subject's own check.** This is the check the subject would face making
+   the request itself: `hasPermissionInEntity()` for an `AuthorizableInEntity`
+   subject; otherwise, the role from `userRoleInEntity()` grants the permission
+   and `userHasDisabledEntity()` is false.
+
+A key therefore never does more than its subject could. Anything that narrows
+the subject, such as losing a role, leaving an organization or disabling an
+entity, narrows each of their keys at once. The subject can't widen the key
+either: a permission or entity the key doesn't hold stays denied.
+
+The check fails closed. A key that acts for someone is denied when
+`actsOnBehalfOf()` returns null (the account is gone), and when its subject is
+neither kind of user subject.
+
+A subject whose `isSuperAdmin()` is true passes its own half, but the key's own
+checks still apply. The request-level super-admin bypass never applies to such a
+key: even when the request's resolved user is a super admin, a key that acts for
+someone is held to its own permissions and links. Being a super admin never turns
+a key into an unlimited credential.
+
+`actsForSomeone()` decides per key, so one key class can serve both kinds. A key
+that acts for nobody is authorized by its own checks alone, exactly like a key
+without the contract.
+
+**With the Gate integration on**, `$user->can(...)` checks the Gate user only and
+never consults the request's key. If your app authenticates a key's subject as
+the request's user, a Gate check answers from that person's roles alone and
+ignores the key's limits. Authorize those requests with `AccessGuard::authorize()`
+or the `access-guard` middleware, which both take the key into account.
 
 ## Assigning roles (batteries included)
 

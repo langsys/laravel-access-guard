@@ -7,6 +7,7 @@ use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Langsys\AccessGuard\Contracts\ActsOnBehalfOf;
 use Langsys\AccessGuard\Contracts\Authorizable;
 use Langsys\AccessGuard\Contracts\AuthorizableByKey;
 use Langsys\AccessGuard\Contracts\AuthorizableByUser;
@@ -104,7 +105,9 @@ class AccessGuardService
 
     private function enforce(?object $user, ?object $subject, string $value, ?GuardableResource $entity): void
     {
-        if ($user instanceof Authorizable && $user->isSuperAdmin()) {
+        // A key that acts for someone is bounded by its own checks whoever the
+        // request's user is, so the super-admin shortcut never lifts them.
+        if ($user instanceof Authorizable && $user->isSuperAdmin() && ! $this->actsForSomeone($subject)) {
             return;
         }
 
@@ -125,6 +128,35 @@ class AccessGuardService
         if (! $key->keyHasPermission($value) || ! $key->keyBelongsToEntity($entity)) {
             throw UnauthorizedException::forPermission($value, $entity);
         }
+
+        if ($key instanceof ActsOnBehalfOf && $key->actsForSomeone()) {
+            $this->authorizeActingSubject($key->actsOnBehalfOf(), $value, $entity);
+        }
+    }
+
+    /**
+     * The acting subject faces the check it would face making the request
+     * itself. A missing subject, or one that is neither kind of user subject,
+     * is denied.
+     */
+    private function authorizeActingSubject(?object $subject, string $value, GuardableResource $entity): void
+    {
+        if ($subject instanceof Authorizable && $subject->isSuperAdmin()) {
+            return;
+        }
+
+        match (true) {
+            $subject instanceof AuthorizableInEntity => $this->authorizeInEntity($subject, $value, $entity),
+            $subject instanceof AuthorizableByUser => $this->authorizeUser($subject, $value, $entity),
+            default => throw UnauthorizedException::forPermission($value, $entity),
+        };
+    }
+
+    private function actsForSomeone(?object $subject): bool
+    {
+        return $subject instanceof AuthorizableByKey
+            && $subject instanceof ActsOnBehalfOf
+            && $subject->actsForSomeone();
     }
 
     private function authorizeInEntity(AuthorizableInEntity $user, string $value, GuardableResource $entity): void
