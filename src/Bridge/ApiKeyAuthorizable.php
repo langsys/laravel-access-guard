@@ -86,7 +86,9 @@ class ApiKeyAuthorizable implements AuthorizableByKey, ActsOnBehalfOf
      * The (morph class, key) pair of the entity and of each ancestor that can
      * appear in the pivot, i.e. each Eloquent model. An ancestor that isn't a
      * model is walked through but contributes no pair. The walk stops at the
-     * first entity it has already visited, so a parent cycle ends it.
+     * first model it has already visited (same morph class and key) or the
+     * same object again. A non-model parent built fresh on each call has
+     * neither, so a loop of those is the entity's own bug to avoid.
      *
      * @return array<int, array{0: string, 1: string}>
      */

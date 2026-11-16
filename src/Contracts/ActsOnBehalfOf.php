@@ -16,8 +16,10 @@ namespace Langsys\AccessGuard\Contracts;
  *
  * So a key never does what its subject couldn't. An acting subject whose
  * isSuperAdmin() is true passes its own half; the key's own checks still apply.
- * The request-level super-admin shortcut does not apply to such a key: a super
- * admin resolved as the request's user does not lift the key's limits either.
+ * In AccessGuard's own checks the request-level super-admin shortcut does not
+ * apply to such a key: a super admin resolved as the request's user does not
+ * lift the key's limits either. The Gate hook sees only the Gate user, so it
+ * applies neither half.
  *
  * One key class can serve keys that act for someone and keys that don't:
  * actsForSomeone() decides per key.

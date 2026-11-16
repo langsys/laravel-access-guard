@@ -190,13 +190,23 @@ A key linked to an entity then reaches everything below it. A key linked to an
 organization is authorized on each of the organization's projects, including
 projects created after the link. Reach runs downward only: a key linked to a
 project is not authorized on its organization or on the project's siblings.
-The lookup follows `guardableParent()` up as many levels as there are, answers in
-one query on `entity_has_api_keys` whatever the depth, and stops if a chain of
-parents loops back on itself.
+The lookup follows `guardableParent()` up as many levels as there are and answers
+in one query on `entity_has_api_keys` whatever the depth. Loading each parent is
+your relation's own query, so eager-load parents when checking many entities.
+The walk stops when it returns to a model it has already visited (same morph
+class and key) or to the same object. A parent that isn't a model and is built
+fresh on every call has no such identity, so it must not form a loop.
+
+Every model in the chain is matched against `entity_has_api_keys.entity_id`, so
+each model's key must fit that column's type. On PostgreSQL, an integer-keyed
+parent of a uuid-keyed entity makes the lookup fail with a database error rather
+than deny.
 
 Only key links read the parent. A user's roles stay scoped to the entity they
 were granted in, so whether an organization admin may act on its projects is for
-your `userRoleInEntity()` (or your role assignments) to express.
+your `userRoleInEntity()` (or your role assignments) to express. The bundled
+`HasRolesInEntities` trait doesn't walk parents: a role held in an organization
+grants nothing on its projects.
 
 A key model that implements `AuthorizableByKey` itself can still use the pivot
 lookup, parents included:
@@ -242,6 +252,12 @@ A key that acts for someone is authorized only when both halves pass:
    subject; otherwise, the role from `userRoleInEntity()` grants the permission
    and `userHasDisabledEntity()` is false.
 
+Both halves are checked on the entity the request acts on. For a key linked to
+an organization and used on one of its projects, the subject must hold the
+permission on that project, which is only possible if the subject's own check
+reaches projects from an organization role (see *Entities inside other
+entities*).
+
 A key therefore never does more than its subject could. Anything that narrows
 the subject, such as losing a role, leaving an organization or disabling an
 entity, narrows each of their keys at once. The subject can't widen the key
@@ -252,10 +268,11 @@ The check fails closed. A key that acts for someone is denied when
 neither kind of user subject.
 
 A subject whose `isSuperAdmin()` is true passes its own half, but the key's own
-checks still apply. The request-level super-admin bypass never applies to such a
-key: even when the request's resolved user is a super admin, a key that acts for
-someone is held to its own permissions and links. Being a super admin never turns
-a key into an unlimited credential.
+checks still apply. In `AccessGuard::authorize()`, `allows()`,
+`filterByPermission()` and the `access-guard` middleware, the request-level
+super-admin bypass doesn't apply to such a key either: even when the request's
+resolved user is a super admin, a key that acts for someone is held to its own
+permissions and links.
 
 `actsForSomeone()` decides per key, so one key class can serve both kinds. A key
 that acts for nobody is authorized by its own checks alone, exactly like a key
@@ -264,8 +281,10 @@ without the contract.
 **With the Gate integration on**, `$user->can(...)` checks the Gate user only and
 never consults the request's key. If your app authenticates a key's subject as
 the request's user, a Gate check answers from that person's roles alone and
-ignores the key's limits. Authorize those requests with `AccessGuard::authorize()`
-or the `access-guard` middleware, which both take the key into account.
+ignores the key's limits. If that person is a super admin and
+`super_admin_via_gate` is on, every Gate check passes. Authorize those requests
+with `AccessGuard::authorize()` or the `access-guard` middleware, which both take
+the key into account.
 
 ## Assigning roles (batteries included)
 

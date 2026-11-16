@@ -42,9 +42,9 @@ class EntityParentLinkTest extends TestCase
         });
     }
 
-    private function key(array $permissions = ['edit_projects']): FakeApiKey
+    private function key(array $permissions = ['edit_projects'], string $id = 'key-1'): FakeApiKey
     {
-        return FakeApiKey::create(['id' => 'key-1', 'permissions' => $permissions]);
+        return FakeApiKey::create(['id' => $id, 'permissions' => $permissions]);
     }
 
     private function actAs(FakeApiKey $key): void
@@ -115,6 +115,28 @@ class EntityParentLinkTest extends TestCase
         $this->actAs($key);
 
         $this->assertTrue(AccessGuard::denies('edit_projects', $project));
+    }
+
+    public function test_another_keys_link_does_not_reach_this_key(): void
+    {
+        // key-2 is linked to the organization and to the project's sibling, so
+        // the lookup finds rows for every pair in the project's lineage, all
+        // belonging to the other key.
+        $organization = Organization::create([]);
+        $project = OrganizationProject::create(['organization_id' => $organization->id]);
+        $key = $this->key();
+        $other = $this->key(id: 'key-2');
+        $organization->grantApiKey($other);
+        $project->grantApiKey($other);
+
+        $this->actAs($key);
+
+        $this->assertTrue(AccessGuard::denies('edit_projects', $project));
+        $this->assertTrue(AccessGuard::denies('edit_projects', $organization));
+
+        $this->actAs($other);
+
+        $this->assertTrue(AccessGuard::allows('edit_projects', $project));
     }
 
     public function test_a_link_matches_the_entity_type_and_id_together(): void
